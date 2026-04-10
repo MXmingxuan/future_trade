@@ -2,24 +2,28 @@
 MiniMax LLM API 客户端封装
 
 支持通过 prompt 字符串调用 MiniMax API，返回结构化 JSON。
+处理 MiniMax-M2.7 的 thinking 块输出。
 """
 import json
 import logging
+import re
 from typing import Any
 
 import requests
 
-from config.postgres_config import get_settings
-
 logger = logging.getLogger(__name__)
+
+# 默认 API 配置
+DEFAULT_API_BASE = "http://127.0.0.1:5001/v1"
+DEFAULT_MODEL = "MiniMax-M2.7"
 
 
 class LLMClient:
     """MiniMax API 调用封装"""
 
-    def __init__(self, api_base: str = "http://127.0.0.1:5001/v1"):
+    def __init__(self, api_base: str = DEFAULT_API_BASE, model: str = DEFAULT_MODEL):
         self.api_base = api_base.rstrip("/")
-        self.settings = get_settings()
+        self.model = model
 
     def analyze_notice(self, prompt: str) -> dict[str, Any]:
         """
@@ -66,7 +70,7 @@ class LLMClient:
         messages.append({"role": "user", "content": prompt})
 
         payload = {
-            "model": "MiniMax-M2.7",
+            "model": self.model,
             "messages": messages,
             "temperature": 0.3,
             "max_tokens": 2048,
@@ -91,21 +95,61 @@ class LLMClient:
             logger.error(f"Unexpected API response format: {data}")
             raise RuntimeError(f"Unexpected API response: {e}") from e
 
-        # 尝试提取 JSON（可能包含在 markdown 代码块中）
-        text = content.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
+        # 解析 JSON，处理 thinking 块和 markdown 代码块
+        result = self._extract_json(content)
+        return result
 
+    def _extract_json(self, text: str) -> dict[str, Any]:
+        """
+        从 LLM 输出中提取 JSON。
+
+        处理：
+        1. MiniMax thinking 块：<think>...</think>
+        2. Markdown 代码块：```json ... ```
+        3. 直接输出的 JSON
+
+        Args:
+            text: LLM 原始输出
+
+        Returns:
+            dict: 解析后的 JSON
+
+        Raises:
+            RuntimeError: 无法从输出中提取 JSON
+        """
+        # 步骤1：去除 thinking 块
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+        # 步骤2：去除 markdown 代码块
+        if text.startswith('```json'):
+            text = text[7:]
+        elif text.startswith('```'):
+            text = text[3:]
+        if text.endswith('```'):
+            text = text[:-3]
+        text = text.strip()
+
+        # 步骤3：尝试直接解析
         try:
-            result = json.loads(text.strip())
-            return result
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON from LLM response: {text[:200]}")
-            raise RuntimeError(f"LLM returned non-JSON: {e}") from e
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # 步骤4：尝试用正则提取第一个 JSON 对象
+        # 匹配 { ... } 结构，能处理嵌套
+        try:
+            # 先找最外层的 {
+            start = text.index('{')
+            # 从后往前找最后一个 }
+            end = text.rindex('}') + 1
+            json_str = text[start:end]
+            return json.loads(json_str)
+        except (ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to parse JSON from LLM response: {text[:300]}")
+            raise RuntimeError(
+                f"LLM returned non-JSON (tried strip, regex): {e}\n"
+                f"Response preview: {text[:500]}"
+            ) from e
 
 
 # 全局单例
