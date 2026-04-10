@@ -4,6 +4,8 @@ Usage:
     python scripts/sync_notices.py
     python scripts/sync_notices.py --stock 000301
     python scripts/sync_notices.py --start 20250101
+    python scripts/sync_notices.py --analyze      # sync then analyze recent notices
+    python scripts/sync_notices.py --analyze --timeseries  # also run time-series analysis
 """
 import sys
 import time
@@ -144,6 +146,12 @@ def main():
     parser.add_argument("--stock", default=None, help="Stock code to sync (default: all in STOCK_LIST)")
     parser.add_argument("--start", default=DEFAULT_START, help="Start date YYYYMMDD (default: 20250101)")
     parser.add_argument("--end", default=None, help="End date YYYYMMDD (default: today)")
+    parser.add_argument("--analyze", action="store_true", help="Run single-notice analysis after sync")
+    parser.add_argument(
+        "--timeseries",
+        action="store_true",
+        help="Also run time-series analysis (implies --analyze)",
+    )
     args = parser.parse_args()
 
     end_date = args.end or datetime.now().strftime("%Y%m%d")
@@ -163,6 +171,27 @@ def main():
             print(f"  Error syncing {stock['code']}: {e}")
 
     print("\n=== All sync complete ===")
+
+    # 自动分析
+    if args.analyze or args.timeseries:
+        from services.notice_analyzer import (
+            analyze_recent_notices,
+            analyze_time_series,
+        )
+
+        target_stock = args.stock  # None means all stocks
+        print(f"\n=== Running notice analysis (stock={target_stock or 'all'}) ===")
+        results = analyze_recent_notices(days=30, stock_code=target_stock, limit=50)
+        analyzed = [r for r in results if r.get("analysis")]
+        print(f"  Analyzed {len(analyzed)} notices")
+
+        if args.timeseries:
+            print("\n=== Running time-series analysis ===")
+            ts_result = analyze_time_series(days=30, stock_code=target_stock)
+            print(f"  Overall trend: {ts_result.get('overall_trend')}")
+            print(f"  Price outlook: {ts_result.get('price_outlook')}")
+            print(f"  Supply direction: {ts_result.get('supply_direction')}")
+            print(f"  Demand direction: {ts_result.get('demand_direction')}")
 
 
 if __name__ == "__main__":
