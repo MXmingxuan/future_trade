@@ -1,0 +1,135 @@
+# future_trade
+
+商品现货与期货价格对比数据爬虫
+
+## 功能
+
+- 爬取生意社现期表数据 (https://www.100ppi.com/sf/)
+- 支持历史数据批量爬取
+- 支持每日增量更新
+- 数据存储到 SQLite 数据库
+
+## 项目结构
+
+```
+future_trade/
+├── config/
+│   └── database.py          # 数据库和爬虫配置
+├── models/
+│   └── models.py             # 数据模型 (SQLAlchemy + Pydantic)
+├── services/
+│   ├── crawler.py            # 爬虫核心 (带代理支持)
+│   └── parser.py             # 页面解析
+├── scripts/
+│   ├── init_db.py            # 初始化数据库
+│   ├── crawl_history.py      # 历史数据爬取
+│   └── crawl_daily.py        # 每日增量爬取
+├── data/
+│   └── future_trade.db       # SQLite 数据库
+└── requirements.txt
+```
+
+## 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+## 配置
+
+在 `config/database.py` 中配置代理:
+
+```python
+PROXY_CONFIG = {
+    "enabled": True,
+    "url": os.getenv("PROXY_URL", ""),  # 设置代理 URL
+}
+```
+
+## 使用
+
+### 1. 初始化数据库
+
+```bash
+python -m scripts.init_db
+```
+
+### 2. 爬取历史数据 (过去30天)
+
+```bash
+python -m scripts.crawl_history
+```
+
+指定天数:
+```bash
+python -m scripts.crawl_history --days 90
+```
+
+### 3. 爬取当日数据
+
+```bash
+python -m scripts.crawl_daily
+```
+
+### 4. 定时任务 (Linux crontab)
+
+每天 17:00 自动爬取:
+```bash
+0 17 * * * cd /path/to/future_trade && python -m scripts.crawl_daily >> crawl.log 2>&1
+```
+
+## 数据库表结构
+
+### commodities - 商品目录表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| name | VARCHAR(50) | 商品名称 |
+| code | VARCHAR(20) | 交易所代码 |
+| exchange | VARCHAR(20) | 交易所 (SHFE/ZCE/DCE/GFE) |
+| unit | VARCHAR(20) | 计量单位 |
+| notes | TEXT | 特殊说明 |
+
+### price_data - 价格数据表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| commodity_id | INTEGER | 商品ID |
+| trade_date | DATE | 交易日期 |
+| spot_price | FLOAT | 现货价格 |
+| near_contract | VARCHAR(10) | 最近合约代码 |
+| near_price | FLOAT | 最近合约期货价格 |
+| near_diff | FLOAT | 现期差1 |
+| near_diff_pct | FLOAT | 现期差1百分比 |
+| main_contract | VARCHAR(10) | 主力合约代码 |
+| main_price | FLOAT | 主力合约期货价格 |
+| main_diff | FLOAT | 现期差2 |
+| main_diff_pct | FLOAT | 现期差2百分比 |
+
+### crawl_log - 爬取日志表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 主键 |
+| crawl_date | DATE | 爬取日期 |
+| status | VARCHAR(20) | 状态 (success/failed) |
+| records_count | INTEGER | 记录数 |
+| error_msg | TEXT | 错误信息 |
+
+## 数据示例
+
+```sql
+-- 查询某商品历史数据
+SELECT p.trade_date, c.name, p.spot_price, p.main_price, p.main_diff_pct
+FROM price_data p
+JOIN commodities c ON p.commodity_id = c.id
+WHERE c.name = '铜'
+ORDER BY p.trade_date DESC
+LIMIT 30;
+
+-- 查询某日期所有数据
+SELECT c.name, c.exchange, p.spot_price, p.main_contract, p.main_price, p.main_diff_pct
+FROM price_data p
+JOIN commodities c ON p.commodity_id = c.id
+WHERE p.trade_date = '2026-04-08'
+ORDER BY c.exchange, c.name;
+```

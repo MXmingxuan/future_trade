@@ -1,0 +1,64 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Temporary files
+*.tmp
+*.temp
+
+# Data exports
+*.csv
+*.parquet
+
+# Database backups
+*.db.bak
+*.db.corrupted
+
+# Checkpoints / state
+future_trade/data/crawl_checkpoints.json
+
+# Test exports
+dongfang_shenghong_notices.csv
+*公告*.csv
+tushare期货数据.md
+
+# Root-level scripts directory (not project scripts)
+scripts/
+"tushare\346\234\237\350\264\247\346\225\260\346\215\256.md"
+
+# But keep future_trade/scripts (project scripts)
+!future_trade/scripts/
+
+# Data files (generated, not source)
+future_trade/data/
