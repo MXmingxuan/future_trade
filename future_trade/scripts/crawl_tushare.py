@@ -15,6 +15,8 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 import time
 
+import re
+import pandas as pd
 import tushare as ts
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -63,23 +65,49 @@ class TushareCrawler:
             print(f"获取合约列表失败 ({exchange}): {e}")
             return []
     
+    # fut_wsr 接口支持的品种代码（已知品种，非合约代码）
+    KNOWN_WSR_SYMBOLS = [
+        'AG', 'AL', 'AP', 'AU', 'BU', 'CF', 'CJ', 'CM', 'CS', 'CU',
+        'CY', 'EB', 'EG', 'ER', 'FG', 'FU', 'JR', 'LR', 'MA', 'NI',
+        'NR', 'OI', 'PB', 'PF', 'PK', 'PM', 'PTA', 'PX', 'RI', 'RM',
+        'RS', 'RU', 'SA', 'SF', 'SH', 'SM', 'SN', 'SR', 'SS', 'TA',
+        'WH', 'WR', 'Y', 'ZC', 'ZN',
+    ]
+
     def get_fut_symbols(self, exchange: str = None) -> List[str]:
-        """获取期货品种列表（用于持仓、仓单等）"""
+        """获取期货品种列表（用于持仓、仓单等）
+
+        注意：必须从 fut_basic 的 name 字段提取，不能从 ts_code 提取。
+        - ts_code: 'TA2604.ZCE' → 提取后是 'TA2604'（合约代码，非品种）
+        - name: 'PTA1001' → 正则提取 'PTA'（品种代码，正确）
+        """
         try:
             df = self.pro.fut_basic(exchange=exchange, fut_type='1')
             if df is None or df.empty:
-                return []
-            # 提取品种代码（去掉月份）
+                return self.KNOWN_WSR_SYMBOLS
             symbols = set()
-            for ts_code in df['ts_code']:
-                # 例如 RB2501.SHF -> RB
-                symbol = ts_code.split('.')[0]
-                if len(symbol) <= 4:  # 品种代码通常2-4位
-                    symbols.add(symbol)
+            for name in df['name']:
+                if pd.notna(name):
+                    name_str = str(name)
+                    # 匹配字母前缀: 'PTA1001' -> 'PTA', 'RB2501' -> 'RB'
+                    match = re.match(r'^([A-Za-z]+)', name_str)
+                    if match:
+                        symbols.add(match.group(1))
+                    # 中文名合约兜底: '动力煤2506' -> 尝试从 fut_basic 的 symbol 字段提取
+                    # symbol 字段如 'ZC506' -> 取纯字母前缀 'ZC'
+                    idx = df[df['name'] == name_str].index[0]
+                    sym = df.loc[idx, 'symbol']
+                    if pd.notna(sym):
+                        letter_match = re.match(r'^([A-Za-z]+)', str(sym))
+                        if letter_match:
+                            symbols.add(letter_match.group(1))
+            # 兜底: 如果提取为空，返回已知 WSR 品种列表
+            if not symbols:
+                return self.KNOWN_WSR_SYMBOLS
             return sorted(list(symbols))
         except Exception as e:
             print(f"获取品种列表失败 ({exchange}): {e}")
-            return []
+            return self.KNOWN_WSR_SYMBOLS
     
     # ============ 数据获取方法 ============
     

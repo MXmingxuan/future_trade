@@ -177,7 +177,7 @@ def get_table_date(html: str) -> Optional[date]:
     """从页面提取日期"""
     soup = BeautifulSoup(html, 'html.parser')
     patterns = [r'(\d{4})年(\d{2})月(\d{2})日', r'(\d{4})-(\d{2})-(\d{2})']
-    
+
     text = soup.get_text()
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -185,3 +185,101 @@ def get_table_date(html: str) -> Optional[date]:
             year, month, day = match.groups()
             return date(int(year), int(month), int(day))
     return None
+
+
+# ============ 100ppi.com/sf2 页面解析（现期表，2019年后格式）============
+
+EXCHANGE_KEYWORDS_SF2 = {
+    '上海期货交易所': 'SHFE',
+    '郑州商品交易所': 'CZCE',
+    '大连商品交易所': 'DCE',
+    '广州期货交易所': 'GFEX',
+}
+
+
+def parse_100ppi_sf2_table(html: str, trade_date: date) -> list[dict]:
+    """解析 https://www.100ppi.com/sf2/ 的现期表
+
+    页面结构（2019年后新格式）:
+    - 表头行1: 商品 | 现货 | 主力合约 | 180日内主力基差  (4 cells)
+    - 表头行2: 价格 | 代码 | 价格 | 基差 | 最高 | 最低 | 平均  (7 cells)
+    - 数据行: 10 cells
+      [0]商品 [1]现货价 [2]主力合约代码 [3]主力合约价格
+      [4]基差（复合格式） [5]基差值 [6]基差百分比
+      [7]180日基差最高 [8]180日基差最低 [9]180日基差均值
+
+    Returns:
+        [{name, exchange, spot_price, main_contract, main_price,
+          basis, basis_pct, basis_180d_max, basis_180d_min, basis_180d_avg}, ...]
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    tables = soup.find_all('table')
+    if not tables:
+        return []
+
+    # 找数据量最大的表格（通常第2个表格是主数据表）
+    main_table = max(tables, key=lambda t: len(t.find_all('tr')))
+    rows = main_table.find_all('tr')
+
+    records = []
+    current_exchange = None
+
+    def parse_num(t: str):
+        if not t or t in ('-', '\xa0', ''):
+            return None
+        t = t.replace(',', '').replace(' ', '').replace('\xa0', '')
+        if t.startswith('(') and t.endswith(')'):
+            t = '-' + t[1:-1]
+        try:
+            return float(t)
+        except ValueError:
+            return None
+
+    def parse_pct(t: str):
+        if not t:
+            return None
+        t = t.replace('%', '').replace(' ', '').replace('\xa0', '')
+        return parse_num(t)
+
+    for row in rows:
+        cells = row.find_all(['td', 'th'])
+
+        # 1 cell = 交易所分隔行
+        if len(cells) == 1:
+            txt = cells[0].get_text(strip=True).replace('\xa0', '')
+            if txt in EXCHANGE_KEYWORDS_SF2:
+                current_exchange = EXCHANGE_KEYWORDS_SF2[txt]
+            continue
+
+        # 忽略表头行（4或7 cells）
+        if len(cells) in (4, 7):
+            continue
+
+        # 忽略补充分组行（2 cells）
+        if len(cells) == 2:
+            continue
+
+        # 数据行：10 cells
+        if len(cells) != 10:
+            continue
+
+        name = cells[0].get_text(strip=True).replace('\xa0', '')
+        if not name or name in ('商品', '现货', '主力合约', '180日内主力基差'):
+            continue
+
+        record = {
+            'name': name,
+            'exchange': current_exchange or 'UNKNOWN',
+            'spot_price': parse_num(cells[1].get_text(strip=True)),
+            'main_contract': cells[2].get_text(strip=True).replace('\xa0', ''),
+            'main_price': parse_num(cells[3].get_text(strip=True)),
+            'basis_combined': cells[4].get_text(strip=True).replace('\xa0', ''),
+            'basis': parse_num(cells[5].get_text(strip=True)),
+            'basis_pct': parse_pct(cells[6].get_text(strip=True)),
+            'basis_180d_max': parse_num(cells[7].get_text(strip=True)),
+            'basis_180d_min': parse_num(cells[8].get_text(strip=True)),
+            'basis_180d_avg': parse_num(cells[9].get_text(strip=True)),
+        }
+        records.append(record)
+
+    return records
