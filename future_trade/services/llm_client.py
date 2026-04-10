@@ -107,6 +107,7 @@ class LLMClient:
         1. MiniMax thinking 块：<think>...</think>
         2. Markdown 代码块：```json ... ```
         3. 直接输出的 JSON
+        4. 被截断的长 JSON（逐行去除尾部 + 补闭合括号）
 
         Args:
             text: LLM 原始输出
@@ -135,21 +136,27 @@ class LLMClient:
         except json.JSONDecodeError:
             pass
 
-        # 步骤4：尝试用正则提取第一个 JSON 对象
-        # 匹配 { ... } 结构，能处理嵌套
-        try:
-            # 先找最外层的 {
-            start = text.index('{')
-            # 从后往前找最后一个 }
-            end = text.rindex('}') + 1
-            json_str = text[start:end]
-            return json.loads(json_str)
-        except (ValueError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to parse JSON from LLM response: {text[:300]}")
-            raise RuntimeError(
-                f"LLM returned non-JSON (tried strip, regex): {e}\n"
-                f"Response preview: {text[:500]}"
-            ) from e
+        # 步骤4：逐行去除尾部 + 补闭合括号（处理截断响应）
+        lines = text.split('\n')
+        for num_remove in range(1, len(lines) + 1):
+            candidate_lines = lines[:-num_remove]
+            candidate = '\n'.join(candidate_lines).rstrip()
+
+            # 剥掉尾随的空白、逗号
+            while candidate and candidate[-1] in ' \t\n,':
+                candidate = candidate[:-1].rstrip()
+
+            # 逐步补闭合括号（最多10层）
+            for _ in range(10):
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+                # 加一个闭合
+                candidate += '}'
+
+        logger.error(f"Failed to parse JSON from LLM response: {text[:500]}")
+        raise RuntimeError(f"LLM returned non-JSON after all recovery attempts\nResponse preview: {text[:500]}")
 
 
 # 全局单例
