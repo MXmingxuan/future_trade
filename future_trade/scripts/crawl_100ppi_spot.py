@@ -217,7 +217,13 @@ def crawl_for_date(trade_date: date) -> int:
     # 连接 PostgreSQL
     try:
         settings = get_settings()
-        conn = psycopg2.connect(**settings)
+        conn = psycopg2.connect(
+            host=settings.pg_host,
+            port=settings.pg_port,
+            database=settings.pg_database,
+            user=settings.pg_user,
+            password=settings.pg_password,
+        )
         conn.autocommit = False
         cur = conn.cursor()
     except Exception as e:
