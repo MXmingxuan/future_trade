@@ -195,7 +195,12 @@ def parse_sf2_page(html: str) -> list[dict]:
 
 def crawl_for_date(trade_date: date) -> int:
     """爬取指定日期的现期表数据并写入 PostgreSQL"""
-    url = 'https://www.100ppi.com/sf2/'
+    # 历史日期 URL 格式：/sf2/day-YYYY-MM-DD.html
+    # 当天 URL：/sf2/（无 day- 前缀）
+    if trade_date == date.today():
+        url = 'https://www.100ppi.com/sf2/'
+    else:
+        url = f'https://www.100ppi.com/sf2/day-{trade_date}.html'
     logger.info(f'爬取 {trade_date} 现期表: {url}')
 
     html = fetch_page(url)
